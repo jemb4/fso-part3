@@ -1,3 +1,5 @@
+require('dotenv').config()
+const Person = require('./models/person')
 const express = require('express')
 const app = express()
 const morgan = require('morgan')
@@ -7,12 +9,11 @@ const cors = require('cors')
 
 app.use(cors())
 
-// MIDDLEWARE , permite usar dist
+// MIDDLEWARE , allow to us dist
 app.use(express.static('dist'))
 
 
 app.use(express.json())
-// app.use(morgan('tiny'))
 
 // Defining a custom token for morgan
 morgan.token('req-body', (req) => {
@@ -22,109 +23,132 @@ morgan.token('req-body', (req) => {
     return "";
 })
 
-// Defining to use morgan with tiny conf custom adding req.body
+// Defining to use morgan middleware with tiny conf custom adding req.body
 app.use(morgan(":method :url :status :res[content-length] - :response-time ms :req-body"))
 
-let persons = [
-    { 
-      "id": 1,
-      "name": "Arto Hellas", 
-      "number": "040-123456"
-    },
-    { 
-      "id": 2,
-      "name": "Ada Lovelace", 
-      "number": "39-44-5323523"
-    },
-    { 
-      "id": 3,
-      "name": "Dan Abramov", 
-      "number": "12-43-234345"
-    },
-    { 
-      "id": 4,
-      "name": "Mary Poppendieck", 
-      "number": "39-23-6423122"
-    }
-]
+
+let persons = []
 
 // ** APP.GET **
 // ALL:
-app.get('/api/persons', (req, res) => {
-    res.json(persons)
+app.get('/api/persons', (request, response) => {
+    Person.find({}).then(persons => {
+        response.json(persons)
+    })
 })
 
 // 1 ENTRY:
-app.get('/api/persons/:id' , (req, res) => {
-    const id = Number(req.params.id)
-    const person = persons.find((person) => person.id === id)
-
-    if (person) {
-        res.json(person)
-    } else {
-        res.statusMessage = 'There is no person'
-        res.status(404).end()
-    }
+app.get('/api/persons/:id' , (request, response, next) => {
+    Person.findById(request.params.id)
+        .then(person => {
+            response.json(person)
+        })
+        .catch(err => next(err))
 })
 
 // INFO
-app.get('/info', (req,res) => {
+app.get('/info', (request, response, next) => {
     const date = new Date()
-    const entries = people.length
-
-    res.send(`
-        <p>Phonebook has info for ${entries} ${entries === 1 ? 'people' : 'person'}</p>
-        <p>${date}</p>
-        `)
+    Person.find({})
+        .then(person => {
+            response.send(`
+                <p>Phonebook has info for ${person.length} ${person.length === 1 ? 'people' : 'person'}</p>
+                <p>${date}</p>
+                `)
+        })
+        .catch(err => next(err))
 })
 
 // ** APP.POST **
-const generateId = () => {
-    return Math.floor(Math.random()*100000)
-}
+
+// NOT USED SINCE MOONGOSE IS USED
+// const generateId = () => {
+//     return Math.floor(Math.random()*100000)
+// } 
+// NOT USED SINCE MOONGOSE IS USED
 
 const comprobateName = (name) => {
     const names = persons.map( n => n.name.toLowerCase())
     return names.includes(name.toLowerCase())
 }
 
-app.post('/api/persons', (req, res) => {
-    const body = req.body
-    console.log(req.body)
+app.post('/api/persons', (request, response, next) => {
+    const body = request.body
 
-    if (!body.name || !body.number) {
-        return res.status(400).json({
-            error: 'name and number needed'
-        })
-    } 
+    // if (!body.name || !body.number) {
+    //     return response.status(400).json({
+    //         error: 'name and number needed'
+    //     })
+    // } 
 
-    if (comprobateName(body.name)){
-        return res.status(400).json({
-            error: 'name must be unique'
-        })
-    }
+    // if (comprobateName(body.name)){
+    //     return response.status(400).json({
+    //         error: 'name must be unique'
+    //     })
+    // }
 
-    const person = {
-        id: generateId(),
+    const person = new Person({
         name: body.name,
         number: body.number
-    }
+    })
 
-    persons = persons.concat(person)
-
-    res.json(person)
+    person.save()
+    .then(savedPerson => {
+        response.json(savedPerson)
+    })
+    .catch(error => next(error))
 })
 
 // ** APP.DELETE **
-app.delete('/api/persons/:id', (req, res) => {
-    const id = Number(req.params.id)
-    persons = persons.filter((person) => person.id !== id )
-
-    res.status(204).end()
+app.delete('/api/persons/:id', (request, response, next) => {
+    Person.findByIdAndDelete(request.params.id)
+        .then(result => {
+            response.status(204).end()
+        })
+        .catch(err => next(err))
 })
 
+// ** APP.PUT **
+
+app.put('/api/persons/:id', (request, response, next) => {
+    const body = request.body
+
+    const person = {
+        name: body.name,
+        number: body.number,
+    }
+
+    Person.findByIdAndUpdate(request.params.id, person, { new: true })
+        .then(updatedPerson => {
+            response.json(updatedPerson)
+        })
+        .catch(err => next(err))
+})
+
+// Middleware who can help if you look for a non exist route
+const unknownEndpoint = (request, response) => {
+    response.status(404).send({ error: 'unknown endpoint' })
+  }
+  
+  app.use(unknownEndpoint)
+
+  // error handdling Middleware
+const errorHandler = (error, request, response, next) => {
+    console.error(error.message)
+  
+    if (error.name === 'CastError') {
+      return response.status(400).send({ error: 'malformatted id' })
+    } else if (error.name === 'ValidationError' || error.number === 'ValidationError') {
+        return response.status(400).json({error: error.message})
+    }
+  
+    next(error)
+  }
+
+  app.use(errorHandler)
+
 // PORT
-const PORT = process.env.PORT || 3001
+const PORT = process.env.PORT
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`)
 })
